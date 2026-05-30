@@ -1,0 +1,49 @@
+# ───────── Gradle ─────────
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ───────── Android Studio / IntelliJ ─────────
+.idea/
+*.iml
+.kotlin/
+*.iws
+*.ipr
+captures/
+
+# ───────── Local config (机器相关) ─────────
+local.properties
+keystore.properties
+*.keystore
+*.jks
+
+# ───────── 编译产物 ─────────
+*.apk
+*.aab
+*.dex
+*.class
+*.ap_
+*.aar
+
+# ───────── 缓存 / 临时 ─────────
+*.log
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+hs_err_pid*
+
+# ───────── 项目运行时 ─────────
+# 应用首次启动会在 cacheDir 下生成这些，不进版本库
+/app/build/
+/app/release/
+app/.cxx/
+
+# ───────── 备份 ─────────
+*_backup_*.tar.gz
+*_backup_*.zip
+
+# ───────── 杂项 ─────────
+.fleet/
+.vscode/
