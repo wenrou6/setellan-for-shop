@@ -266,8 +266,11 @@ object Analyzer {
 
         while (queue.isNotEmpty()) {
             val token = queue.removeFirst()
+            val tokenCategory = itemByToken[token]?.category ?: continue
             for (neighbor in associations[token] ?: emptyList()) {
                 if (neighbor in expanded) continue
+                val neighborCategory = itemByToken[neighbor]?.category ?: continue
+                if (neighborCategory != tokenCategory) continue
                 expanded.add(neighbor)
                 queue.add(neighbor)
             }

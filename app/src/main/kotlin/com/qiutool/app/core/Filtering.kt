@@ -165,13 +165,22 @@ object Filtering {
         keepTokens: Set<String>,
         primary: String
     ) {
+        val blanked = mutableSetOf<Int>()
         for (field in record.stringFields) {
             TokenClassifier.classify(field.text) ?: continue
             if (field.text in keepTokens) continue
-            val replacement = findReplacementStringOffset(record, field.fieldPosition, keepTokens, primary) ?: continue
-            val relative = replacement - field.fieldPosition
-            if (relative <= 0 || relative > 0x7FFFFFFF) continue
-            writeLe32(payload, field.fieldPosition, relative)
+            val replacement = findReplacementStringOffset(record, field.fieldPosition, keepTokens, primary)
+            if (replacement != null) {
+                val relative = replacement - field.fieldPosition
+                if (relative > 0 && relative <= 0x7FFFFFFF) {
+                    writeLe32(payload, field.fieldPosition, relative)
+                    continue
+                }
+            }
+            if (field.stringOffset !in blanked) {
+                blankStringObject(payload, field.stringOffset, field.length)
+                blanked.add(field.stringOffset)
+            }
         }
     }
 
@@ -291,21 +300,32 @@ object Filtering {
             FlatBufferScanner.primaryTokenOfRecord(it) { TokenClassifier.classify(it) }
         }.filter { it.isNotEmpty() }
         val primarySet = primaries.toSet()
+        val tokenStrings = recordIndex.records
+            .flatMap { record ->
+                record.stringFields.mapNotNull { field ->
+                    if (TokenClassifier.classify(field.text) != null) field.text else null
+                }
+            }
+            .toSet()
 
         AppLogger.d(
             "QiuTool",
-            "validateExport mode=$mode outputSize=${outputPath.length()} recordCount=${recordIndex.records.size} uniquePrimaries=${primarySet.size}"
+            "validateExport mode=$mode outputSize=${outputPath.length()} recordCount=${recordIndex.records.size} uniquePrimaries=${primarySet.size} tokenStrings=${tokenStrings.size}"
         )
 
         if (mode == "keep") {
             val missing = selectedTokens.filter { it.isNotEmpty() && it !in primarySet }
             val unexpected = primarySet.filter { it !in selectedTokens }
+            val unexpectedTokenStrings = tokenStrings.filter { it !in selectedTokens }
             AppLogger.d(
                 "QiuTool",
-                "keep mode: selected=${selectedTokens.size} foundOfSelected=${selectedTokens.size - missing.size} missing=${missing.take(8)} unexpectedInOutput=${unexpected.take(8)}"
+                "keep mode: selected=${selectedTokens.size} foundOfSelected=${selectedTokens.size - missing.size} missing=${missing.take(8)} unexpectedPrimaries=${unexpected.take(8)} unexpectedTokenStrings=${unexpectedTokenStrings.take(8)}"
             )
             if (missing.isNotEmpty()) {
                 throw RuntimeException("Export verification failed: missing kept items ${missing.take(6)}")
+            }
+            if (unexpectedTokenStrings.isNotEmpty()) {
+                throw RuntimeException("Export verification failed: unexpected token strings ${unexpectedTokenStrings.take(6)}")
             }
             return ExportSummary(
                 mode = mode,
