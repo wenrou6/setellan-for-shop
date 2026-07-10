@@ -2,7 +2,6 @@ package com.qiutool.app.core
 
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import kotlinx.coroutines.suspendCancellableCoroutine
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
@@ -16,7 +15,7 @@ object ShizukuRunner {
     fun isBinderAlive(): Boolean = try {
         Shizuku.pingBinder()
     } catch (e: Throwable) {
-        Log.w("QiuTool", "shizuku ping failed: ${e.message}")
+        AppLogger.w("QiuTool", "shizuku ping failed: ${e.message}")
         false
     }
 
@@ -26,7 +25,7 @@ object ShizukuRunner {
             if (Shizuku.isPreV11()) return false
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         } catch (e: Throwable) {
-            Log.w("QiuTool", "shizuku checkPermission failed: ${e.message}")
+            AppLogger.w("QiuTool", "shizuku checkPermission failed: ${e.message}")
             false
         }
     }
@@ -77,11 +76,11 @@ object ShizukuRunner {
             val exit = process.waitFor()
             if (exit != 0) {
                 val err = BufferedReader(InputStreamReader(process.errorStream)).readText()
-                Log.w("QiuTool", "shizuku exec exit=$exit cmd=$cmd err=$err")
+                AppLogger.w("QiuTool", "shizuku exec exit=$exit cmd=$cmd err=$err")
             }
             exit
         } catch (e: Throwable) {
-            Log.w("QiuTool", "shizuku exec failed: ${e.message}")
+            AppLogger.w("QiuTool", "shizuku exec failed: ${e.message}")
             -1
         }
     }

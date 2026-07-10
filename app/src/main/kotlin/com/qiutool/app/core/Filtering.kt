@@ -15,7 +15,7 @@ object Filtering {
         onProgress: ((Int, String) -> Unit)? = null
     ): ExportResult {
         require(mode in listOf("keep", "exclude")) { "mode must be keep or exclude" }
-        android.util.Log.d("QiuTool", "exportFilteredBundle mode=$mode selectedRaw=${selectedTokens.size}")
+        AppLogger.d("QiuTool", "exportFilteredBundle mode=$mode selectedRaw=${selectedTokens.size}")
 
         onProgress?.invoke(6, "Reading ShopConfig payload")
         val payload = BundleIO.extractShopconfigPayload(sourceBundle)
@@ -23,14 +23,14 @@ object Filtering {
         onProgress?.invoke(18, "Building record index")
         val recordIndex = FlatBufferScanner.buildRecordIndex(payload)
         val (recordByPrimary, primaryByTable) = buildPrimaryRecordMaps(recordIndex)
-        android.util.Log.d(
+        AppLogger.d(
             "QiuTool",
             "source records=${recordIndex.records.size} uniquePrimaries=${recordByPrimary.size}"
         )
 
         onProgress?.invoke(30, "Expanding selection set")
         val expandedTokens = Analyzer.expandSelectedTokens(selectedTokens.filter { it.isNotEmpty() }.toSet(), analysis.items)
-        android.util.Log.d(
+        AppLogger.d(
             "QiuTool",
             "expandedTokens count=${expandedTokens.size} sample=${expandedTokens.take(6).toList()}"
         )
@@ -50,7 +50,7 @@ object Filtering {
                 (primaryByTable[it.tableOffset] ?: "") !in excludeTokens
             }.map { it.tableOffset }.toSet()
         }
-        android.util.Log.d(
+        AppLogger.d(
             "QiuTool",
             "keepTableOffsets=${keepTableOffsets.size} (mode=$mode, totalRecords=${recordIndex.records.size})"
         )
@@ -292,7 +292,7 @@ object Filtering {
         }.filter { it.isNotEmpty() }
         val primarySet = primaries.toSet()
 
-        android.util.Log.d(
+        AppLogger.d(
             "QiuTool",
             "validateExport mode=$mode outputSize=${outputPath.length()} recordCount=${recordIndex.records.size} uniquePrimaries=${primarySet.size}"
         )
@@ -300,7 +300,7 @@ object Filtering {
         if (mode == "keep") {
             val missing = selectedTokens.filter { it.isNotEmpty() && it !in primarySet }
             val unexpected = primarySet.filter { it !in selectedTokens }
-            android.util.Log.d(
+            AppLogger.d(
                 "QiuTool",
                 "keep mode: selected=${selectedTokens.size} foundOfSelected=${selectedTokens.size - missing.size} missing=${missing.take(8)} unexpectedInOutput=${unexpected.take(8)}"
             )
@@ -315,7 +315,7 @@ object Filtering {
             )
         } else {
             val remained = selectedTokens.filter { it.isNotEmpty() && it in primarySet }
-            android.util.Log.d(
+            AppLogger.d(
                 "QiuTool",
                 "exclude mode: removedRequested=${selectedTokens.size} stillPresent=${remained.size} totalAfter=${primarySet.size}"
             )

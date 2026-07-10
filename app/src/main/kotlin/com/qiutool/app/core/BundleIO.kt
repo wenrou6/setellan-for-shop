@@ -164,7 +164,7 @@ object BundleIO {
         val t3 = System.currentTimeMillis()
         val payload = findShopConfigPayload(uncompressedData)
         val t4 = System.currentTimeMillis()
-        android.util.Log.d("QiuTool", "read=${t1-t0}ms parse=${t2-t1}ms decompress=${t3-t2}ms search=${t4-t3}ms uncompressed=${uncompressedData.size}B blocks=${layout.blocks.size}")
+        AppLogger.d("QiuTool", "read=${t1-t0}ms parse=${t2-t1}ms decompress=${t3-t2}ms search=${t4-t3}ms uncompressed=${uncompressedData.size}B blocks=${layout.blocks.size}")
         if (payload == null) {
             val found = listTextAssetNames(uncompressedData)
             val hint = if (found.isEmpty()) "No TextAsset objects found" else "Found TextAssets: ${found.joinToString(", ")}"

@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.qiutool.app.core.AppLogger
 import com.qiutool.app.core.PermissionMethod
 import com.qiutool.app.ui.AppTheme
 import com.qiutool.app.ui.DISCLAIMER_VERSION
@@ -19,6 +20,7 @@ import com.qiutool.app.ui.PermissionScreen
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLogger.init(applicationContext)
         enableEdgeToEdge()
         val prefs = getSharedPreferences("qiutool_settings", Context.MODE_PRIVATE)
 

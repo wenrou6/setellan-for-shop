@@ -1,6 +1,5 @@
 package com.qiutool.app.core
 
-import android.util.Log
 import java.io.File
 
 object Analyzer {
@@ -11,7 +10,7 @@ object Analyzer {
         val t1 = System.currentTimeMillis()
         val items = analyzePayload(payload)
         val t2 = System.currentTimeMillis()
-        Log.d("QiuTool", "extract=${t1-t0}ms analyze=${t2-t1}ms payload=${payload.size}B")
+        AppLogger.d("QiuTool", "extract=${t1-t0}ms analyze=${t2-t1}ms payload=${payload.size}B")
         return AnalysisResult(
             sourceBundleName = bundlePath.name,
             payloadSize = payload.size,
@@ -43,20 +42,20 @@ object Analyzer {
             sortOffsets[token] = minOffset
         }
         val t2 = System.currentTimeMillis()
-        Log.d("QiuTool", "index=${t1-t0}ms group=${t2-t1}ms tokens=${grouped.size} records=${index.records.size}")
+        AppLogger.d("QiuTool", "index=${t1-t0}ms group=${t2-t1}ms tokens=${grouped.size} records=${index.records.size}")
 
         val items = grouped.keys.sortedBy { sortOffsets[it] ?: Int.MAX_VALUE }.map { token ->
             buildItemRecord(token, grouped[token]!!)
         }
         val t3 = System.currentTimeMillis()
-        Log.d("QiuTool", "build=${t3-t2}ms items=${items.size}")
+        AppLogger.d("QiuTool", "build=${t3-t2}ms items=${items.size}")
 
         val associationMap = buildAssociationMap(items)
         val result = items.map { item ->
             item.copy(associatedTokens = associationMap[item.token] ?: emptyList())
         }
         val t4 = System.currentTimeMillis()
-        Log.d("QiuTool", "assoc=${t4-t3}ms total=${t4-t0}ms")
+        AppLogger.d("QiuTool", "assoc=${t4-t3}ms total=${t4-t0}ms")
         return result
     }
 

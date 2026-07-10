@@ -5,7 +5,6 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import android.util.Log
 import com.qiutool.app.core.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -158,6 +157,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isLoading = false,
                 )
             } catch (e: Exception) {
+                AppLogger.w("QiuTool", "fetch ver.xml failed: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = "Failed to fetch ver.xml: ${e.message}"
@@ -176,7 +176,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     withContext(Dispatchers.IO) {
                         CdnFetcher.downloadResource(item, cacheDir)
                     }
-                    Log.d("QiuTool", "download=${System.currentTimeMillis()-dlStart}ms size=${destFile.length()}B")
+                    AppLogger.d("QiuTool", "download=${System.currentTimeMillis()-dlStart}ms size=${destFile.length()}B")
                 }
                 val result = analyzeBundleCached(destFile, expectedMd5 = item.md5)
                 _uiState.value = _uiState.value.copy(
@@ -187,6 +187,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     currentTab = 2,
                 )
             } catch (e: Exception) {
+                AppLogger.w("QiuTool", "analyze resource failed: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = "Analysis failed: ${e.message}"
@@ -227,6 +228,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     currentTab = 2,
                 )
             } catch (e: Exception) {
+                AppLogger.w("QiuTool", "analyze local file failed: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = "Analysis failed: ${e.message}"
@@ -255,7 +257,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } catch (e: Exception) {
-            Log.w("QiuTool", "resolveUriDisplayName query failed: ${e.message}")
+            AppLogger.w("QiuTool", "resolveUriDisplayName query failed: ${e.message}")
         }
         val last = uri.lastPathSegment?.substringAfterLast('/')
         return last?.let { sanitizeFileName(it) }
@@ -273,14 +275,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: withContext(Dispatchers.IO) { fileMd5(file) }
             val cacheFile = File(analysisCacheDir, "$md5.bin")
             loadCachedAnalysis(cacheFile)?.let { cached ->
-                Log.d("QiuTool", "analysis cache hit md5=$md5 items=${cached.items.size}")
+                AppLogger.d("QiuTool", "analysis cache hit md5=$md5 items=${cached.items.size}")
                 return@withContext cached.copy(sourceBundleName = file.name)
             }
 
             val result = Analyzer.analyzeBundle(file)
             withContext(Dispatchers.IO) {
                 runCatching { saveCachedAnalysis(cacheFile, result) }
-                    .onFailure { Log.w("QiuTool", "save analysis cache failed: ${it.message}") }
+                    .onFailure { AppLogger.w("QiuTool", "save analysis cache failed: ${it.message}") }
                 trimAnalysisCache(maxFiles = 12)
             }
             result
@@ -293,7 +295,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 input.readObject() as? AnalysisResult
             }
         } catch (e: Exception) {
-            Log.w("QiuTool", "read analysis cache failed: ${e.message}")
+            AppLogger.w("QiuTool", "read analysis cache failed: ${e.message}")
             null
         }
     }
@@ -385,6 +387,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return File(dir)
     }
 
+    private fun createStagingDir(method: String): File? {
+        // Shizuku newProcess 通常以 shell 身份运行，读不到 App 私有 cache：
+        // /data/user/0/<pkg>/cache/...
+        // 所以 Shizuku 暂存必须放到 App 外部缓存目录，让 App 可写且 shell 可读。
+        val root = if (method == PermissionMethod.SHIZUKU) {
+            getApplication<Application>().externalCacheDir ?: return null
+        } else {
+            cacheDir
+        }
+        return File(root, "export_staging").apply {
+            deleteRecursively()
+            mkdirs()
+        }
+    }
+
     fun exportBundle() {
         val state = _uiState.value
         val analysis = state.analysis ?: return
@@ -413,18 +430,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     PermissionMethod.SHIZUKU -> "Shizuku"
                     else -> "直写"
                 }
-                val stagingDir = File(cacheDir, "export_staging").apply {
-                    deleteRecursively()
-                    mkdirs()
+                val stagingDir = if (usePrivileged) createStagingDir(method) else null
+                if (usePrivileged && stagingDir == null) {
+                    AppLogger.w("QiuTool", "$methodLabel staging dir unavailable: external cache dir is null")
+                    _uiState.value = _uiState.value.copy(
+                        isExporting = false,
+                        error = "$methodLabel 暂存目录不可用：外部存储未挂载，无法让 Shizuku 读取待导出文件。"
+                    )
+                    return@launch
                 }
                 if (!usePrivileged) {
                     val mkOk = try {
                         targetDir.mkdirs() || targetDir.isDirectory
                     } catch (e: Exception) {
-                        Log.w("QiuTool", "mkdirs failed for $targetDir: ${e.message}")
+                        AppLogger.w("QiuTool", "mkdirs failed for $targetDir: ${e.message}")
                         false
                     }
                     if (!mkOk) {
+                        AppLogger.w("QiuTool", "cannot create export dir: ${targetDir.absolutePath}")
                         _uiState.value = _uiState.value.copy(
                             isExporting = false,
                             error = "无法创建导出目录：${targetDir.absolutePath}\n请在「设置」里切换权限方式（Root / Shizuku）或为本应用授予「所有文件访问」。"
@@ -432,7 +455,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         return@launch
                     }
                 }
-                val writeDir = if (usePrivileged) stagingDir else targetDir
+                val writeDir = stagingDir ?: targetDir
                 val result = withContext(Dispatchers.Default) {
                     Filtering.exportFilteredBundle(
                         sourceBundle = sourceFile,
@@ -452,24 +475,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val sourceSize = sourceFile.length()
                 val outputSize = result.file.length()
                 if (usePrivileged) {
+                    val activeStagingDir = stagingDir ?: return@launch
                     _uiState.value = _uiState.value.copy(
                         exportProgress = 100,
                         exportMessage = "$methodLabel 拷贝到 ${targetDir.absolutePath}…"
                     )
-                    val files = stagingDir.listFiles().orEmpty()
+                    val files = activeStagingDir.listFiles().orEmpty()
                     val failed = withContext(Dispatchers.IO) {
                         files.filterNot { f ->
                             PermissionMethod.copyTo(f, File(targetDir, f.name), method)
                         }
                     }
                     if (failed.isNotEmpty()) {
+                        AppLogger.w(
+                            "QiuTool",
+                            "$methodLabel copy failed files=${failed.joinToString { it.name }} staging=${activeStagingDir.absolutePath} target=${targetDir.absolutePath}"
+                        )
                         _uiState.value = _uiState.value.copy(
                             isExporting = false,
-                            error = "$methodLabel 拷贝失败：${failed.joinToString { it.name }}\n请确认权限已授予。导出文件暂存于 ${stagingDir.absolutePath}"
+                            error = "$methodLabel 拷贝失败：${failed.joinToString { it.name }}\n请确认权限已授予。导出文件暂存于 ${activeStagingDir.absolutePath}"
                         )
                         return@launch
                     }
-                    stagingDir.deleteRecursively()
+                    activeStagingDir.deleteRecursively()
                 }
                 val summaryMsg = buildString {
                     if (summary.mode == "keep") {
@@ -487,6 +515,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     exportMessage = "已导出到 ${targetDir.absolutePath}\n$summaryMsg"
                 )
             } catch (e: Exception) {
+                AppLogger.e("QiuTool", "export failed: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(
                     isExporting = false,
                     error = "导出失败：${e.message}"

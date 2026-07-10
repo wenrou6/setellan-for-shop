@@ -1,5 +1,7 @@
 package com.qiutool.app.ui
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -21,10 +24,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.qiutool.app.R
+import com.qiutool.app.core.AppLogger
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: MainViewModel = viewModel()) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val state by viewModel.uiState.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
     var showPermissionPicker by remember { mutableStateOf(false) }
@@ -226,6 +235,29 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                     showSettings = false
                     showPermissionPicker = true
                 },
+                onShareLogs = {
+                    scope.launch {
+                        val fileResult = runCatching {
+                            withContext(Dispatchers.IO) {
+                                DiagnosticLogExporter.createReportFile(context, state)
+                            }
+                        }
+                        fileResult
+                            .onSuccess { file ->
+                                val share = DiagnosticLogExporter.shareIntent(context, file)
+                                runCatching {
+                                    context.startActivity(Intent.createChooser(share, "分享日志"))
+                                }.onFailure { error ->
+                                    AppLogger.w("QiuTool", "share diagnostic log failed: ${error.message}", error)
+                                    Toast.makeText(context, "无法打开分享：${error.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                            .onFailure { error ->
+                                AppLogger.w("QiuTool", "create diagnostic log failed: ${error.message}", error)
+                                Toast.makeText(context, "保存日志失败：${error.message}", Toast.LENGTH_LONG).show()
+                            }
+                    }
+                },
             )
         }
 
@@ -278,6 +310,7 @@ private fun SettingsDialog(
     onShopconfigDirChange: (String) -> Unit,
     onOtherDirChange: (String) -> Unit,
     onPickPermission: () -> Unit,
+    onShareLogs: () -> Unit,
 ) {
     var editing by remember { mutableStateOf<EditField?>(null) }
 
@@ -329,6 +362,11 @@ private fun SettingsDialog(
                     label = "其他文件 导出目录",
                     value = state.otherOutputDir,
                     onClick = { editing = EditField.OTHER_DIR },
+                )
+                ConfigRow(
+                    label = "保存日志",
+                    value = "生成诊断日志并弹出分享",
+                    onClick = onShareLogs,
                 )
             }
         },

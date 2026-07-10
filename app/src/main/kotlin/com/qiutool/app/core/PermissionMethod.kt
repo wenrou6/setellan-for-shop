@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
-import android.util.Log
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -72,13 +71,13 @@ object PermissionMethod {
             val exit = proc.waitFor()
             watchdog.interrupt()
             if (exit != 0) {
-                Log.w("QiuTool", "root probe timeout — killing su")
+                AppLogger.w("QiuTool", "root probe timeout — killing su")
                 false
             } else {
                 true
             }
         } catch (e: Exception) {
-            Log.w("QiuTool", "root probe failed: ${e.message}")
+            AppLogger.w("QiuTool", "root probe failed: ${e.message}")
             proc?.destroy()
             false
         }
@@ -101,7 +100,7 @@ object PermissionMethod {
         src.copyTo(dest, overwrite = true)
         true
     } catch (e: Exception) {
-        Log.w("QiuTool", "direct copy failed: ${e.message}")
+        AppLogger.w("QiuTool", "direct copy failed: ${e.message}")
         false
     }
 
@@ -113,11 +112,11 @@ object PermissionMethod {
             val exit = proc.waitFor()
             if (exit != 0) {
                 val err = BufferedReader(InputStreamReader(proc.errorStream)).readText()
-                Log.w("QiuTool", "root cp exit=$exit err=$err")
+                AppLogger.w("QiuTool", "root cp exit=$exit err=$err")
             }
             exit == 0
         } catch (e: Exception) {
-            Log.w("QiuTool", "root cp failed: ${e.message}")
+            AppLogger.w("QiuTool", "root cp failed: ${e.message}")
             false
         }
     }

@@ -11,8 +11,8 @@ android {
         applicationId "com.qiutool.app"
         minSdk 24
         targetSdk 34
-        versionCode 2
-        versionName "2.0-native"
+        versionCode 3
+        versionName "2.0.1-native"
     }
 
     buildTypes {
@@ -57,4 +57,6 @@ dependencies {
     // Shizuku
     implementation 'dev.rikka.shizuku:api:13.1.5'
     implementation 'dev.rikka.shizuku:provider:13.1.5'
+
+    testImplementation 'junit:junit:4.13.2'
 }
