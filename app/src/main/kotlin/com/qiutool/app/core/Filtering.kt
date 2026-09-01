@@ -138,9 +138,35 @@ object Filtering {
         primaryByTable: Map<Int, String>,
         aggressive: Boolean
     ) {
-        for (record in records) {
-            if (record.tableOffset !in keepTableOffsets) continue
-            redirectUnkeptTokenFields(payload, record, keepTokens, primaryByTable[record.tableOffset] ?: "")
+        // record.stringFields 只包含 buildRecordIndex 采样确认过的字段索引。源 payload 有 6 万+ record，
+        // 采样（最多 256 条）可能整个漏掉某个只在少数 record 上才有值的字段；而导出后 record 被压缩到
+        // 几千甚至 1 条，重新 buildRecordIndex 会把这些字段全部暴露出来。这些字段没被 scrub 过，于是
+        // 既留下别的 token 字符串，又可能顶掉本行的 primary（同一行里出现第二个 Gift token 时，
+        // primaryTokenOfRecord 取最后一个）。所以保留行必须按 vtable 的完整物理字段视图处理。
+        val keptRecords = records.filter { it.tableOffset in keepTableOffsets }
+        val physicalFields = HashMap<Int, List<FlatStringField>>(keptRecords.size)
+        for (record in keptRecords) {
+            physicalFields[record.tableOffset] =
+                readPhysicalStringFields(payload, record.tableOffset) ?: record.stringFields
+        }
+
+        // 多行可能共享同一个字符串对象，保留行 primary 所在的偏移一律不许清零。
+        val protectedOffsets = HashSet<Int>()
+        for (record in keptRecords) {
+            val primary = primaryByTable[record.tableOffset] ?: continue
+            if (primary.isEmpty()) continue
+            physicalFields[record.tableOffset]?.forEach { field ->
+                if (field.text == primary) protectedOffsets.add(field.stringOffset)
+            }
+        }
+
+        for (record in keptRecords) {
+            redirectForeignTokenFields(
+                payload = payload,
+                fields = physicalFields[record.tableOffset] ?: continue,
+                primary = primaryByTable[record.tableOffset] ?: "",
+                protectedOffsets = protectedOffsets,
+            )
         }
 
         val referencedOffsets = collectKeptStringOffsets(payload, records, keepTableOffsets)
@@ -149,6 +175,7 @@ object Filtering {
             if (!aggressive && record.tableOffset in keepTableOffsets) continue
             for (field in record.stringFields) {
                 if (field.stringOffset in referencedOffsets || field.stringOffset in scrubbed) continue
+                if (field.stringOffset in protectedOffsets) continue
                 if (aggressive) {
                     blankStringObject(payload, field.stringOffset, field.length)
                 } else {
@@ -159,17 +186,33 @@ object Filtering {
         }
     }
 
-    private fun redirectUnkeptTokenFields(
+    private fun readPhysicalStringFields(payload: ByteArray, tableOffset: Int): List<FlatStringField>? {
+        val info = FlatBufferScanner.readVtable(
+            java.nio.ByteBuffer.wrap(payload).order(java.nio.ByteOrder.LITTLE_ENDIAN),
+            tableOffset
+        ) ?: return null
+        return FlatBufferScanner.iterStringFields(payload, info)
+    }
+
+    /**
+     * 保留行里除 primary 以外的 token 字段全部改指向 primary（改不了才清零）。
+     *
+     * 不只处理「未保留」的 token：同一行里如果还留着**另一个也被保留的** Gift token，
+     * primaryTokenOfRecord 取 giftTokens.last()，导出后可能由它胜出，这一行的身份就从
+     * Gift_1617 变成 Gift_1628，validateExport 于是报 missing kept items [Gift_1617]。
+     * 让 primary 成为行内唯一的 token 字符串，身份就跟字段发现顺序无关了。
+     */
+    private fun redirectForeignTokenFields(
         payload: ByteArray,
-        record: FlatRecord,
-        keepTokens: Set<String>,
-        primary: String
+        fields: List<FlatStringField>,
+        primary: String,
+        protectedOffsets: Set<Int>,
     ) {
         val blanked = mutableSetOf<Int>()
-        for (field in record.stringFields) {
+        for (field in fields) {
             TokenClassifier.classify(field.text) ?: continue
-            if (field.text in keepTokens) continue
-            val replacement = findReplacementStringOffset(record, field.fieldPosition, keepTokens, primary)
+            if (primary.isNotEmpty() && field.text == primary) continue
+            val replacement = findReplacementStringOffset(fields, field.fieldPosition, primary)
             if (replacement != null) {
                 val relative = replacement - field.fieldPosition
                 if (relative > 0 && relative <= 0x7FFFFFFF) {
@@ -177,6 +220,7 @@ object Filtering {
                     continue
                 }
             }
+            if (field.stringOffset in protectedOffsets) continue
             if (field.stringOffset !in blanked) {
                 blankStringObject(payload, field.stringOffset, field.length)
                 blanked.add(field.stringOffset)
@@ -185,20 +229,15 @@ object Filtering {
     }
 
     private fun findReplacementStringOffset(
-        record: FlatRecord,
+        fields: List<FlatStringField>,
         fieldPosition: Int,
-        keepTokens: Set<String>,
         primary: String
     ): Int? {
         val preferred = mutableListOf<Int>()
         val fallback = mutableListOf<Int>()
-        for (candidate in record.stringFields) {
+        for (candidate in fields) {
             if (candidate.stringOffset <= fieldPosition) continue
             if (primary.isNotEmpty() && candidate.text == primary) {
-                preferred.add(candidate.stringOffset)
-                continue
-            }
-            if (candidate.text in keepTokens) {
                 preferred.add(candidate.stringOffset)
                 continue
             }
@@ -296,13 +335,23 @@ object Filtering {
     private fun validateExport(outputPath: File, mode: String, selectedTokens: Set<String>): ExportSummary {
         val payload = BundleIO.extractShopconfigPayload(outputPath)
         val recordIndex = FlatBufferScanner.buildRecordIndex(payload)
-        val primaries = recordIndex.records.map {
-            FlatBufferScanner.primaryTokenOfRecord(it) { TokenClassifier.classify(it) }
+
+        // 按完整物理字段视图校验，不用 record.stringFields。后者只含 buildRecordIndex 采样确认过的
+        // 字段索引，而采样落点取决于 record 总数——导出后 record 被压缩，采样结果跟源 payload 不一致，
+        // 校验就会看到一份跟 scrub 阶段不同的字段集合，误报 missing kept items。
+        val fieldsByTable = recordIndex.records.associate { record ->
+            record.tableOffset to (readPhysicalStringFields(payload, record.tableOffset) ?: record.stringFields)
+        }
+        val primaries = recordIndex.records.map { record ->
+            val fields = fieldsByTable[record.tableOffset] ?: record.stringFields
+            FlatBufferScanner.primaryTokenOfRecord(record.copy(stringFields = fields)) {
+                TokenClassifier.classify(it)
+            }
         }.filter { it.isNotEmpty() }
         val primarySet = primaries.toSet()
-        val tokenStrings = recordIndex.records
-            .flatMap { record ->
-                record.stringFields.mapNotNull { field ->
+        val tokenStrings = fieldsByTable.values
+            .flatMap { fields ->
+                fields.mapNotNull { field ->
                     if (TokenClassifier.classify(field.text) != null) field.text else null
                 }
             }

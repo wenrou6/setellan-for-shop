@@ -108,6 +108,13 @@ object FlatBufferScanner {
         if (candidateFields.isEmpty()) return emptySet()
 
         // Phase 2: 在均匀采样的 record 上验证哪些是字符串
+        //
+        // 注意：采样结果依赖 record 总数，所以源 payload（6 万+ 条）和导出后的 payload（压缩到几千条）
+        // 会得出不同的字段集合。这里刻意不改成全量扫描——全量会让 4 条 record 的 primary 变化
+        // （行内出现第二个 Gift token 时 giftTokens.last() 选了后面那个），用户可见的条目列表会凭空少 4 项、
+        // 原本能勾选的 Gift_1617 直接消失。导出的正确性改在 Filtering 里保证：
+        // scrubUnkeptRecordStrings 按完整物理字段视图把保留行内所有 token 字段都指向 primary，
+        // validateExport 也按完整物理字段视图校验，两边都不受采样影响。
         val sampleCount = minOf(totalCount, 256)
         val step = if (sampleCount > 0) maxOf(1, totalCount / sampleCount) else 1
         val confirmed = HashSet<Int>()
@@ -377,7 +384,16 @@ object FlatBufferScanner {
     fun primaryTokenOfRecord(record: FlatRecord, classifier: ((String) -> String?)? = null): String {
         val tokenFields = mutableListOf<Triple<Int, String, String>>()
         for (field in record.stringFields) {
-            val category = classifier?.invoke(field.text) ?: defaultTokenCategory(field.text)
+            // 传了 classifier 就以它为准：它返回 null 表示「这不是 token」，不能再退回
+            // defaultTokenCategory 的宽松 startsWith 判断。否则像 'bz_sf_1318'（多一个下划线，
+            // 过不了 ^bz_sf\d+$）会被宽松规则认成 bz_sf 类并当上 primary，把同一行里真正的
+            // token 'bz_sf1318' 挡住——该条目于是永远不可能被保留，导出必然报 missing kept items。
+            // Analyzer 侧本来就只认严格分类，这里跟它保持一致。
+            val category = if (classifier != null) {
+                classifier.invoke(field.text)
+            } else {
+                defaultTokenCategory(field.text)
+            }
             if (category != null) {
                 tokenFields.add(Triple(field.fieldIndex, category, field.text))
             }

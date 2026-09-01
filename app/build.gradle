@@ -11,8 +11,8 @@ android {
         applicationId "com.qiutool.app"
         minSdk 24
         targetSdk 34
-        versionCode 4
-        versionName "2.0.2-native"
+        versionCode 5
+        versionName "2.0.3-native"
     }
 
     buildTypes {
