@@ -23,8 +23,12 @@ fun ExportBar(
     message: String,
     selectedCount: Int,
     totalCount: Int,
+    templateMessage: String,
+    templateMissing: List<String>,
     onModeChange: (String) -> Unit,
-    onExport: () -> Unit
+    onExport: () -> Unit,
+    onOpenTemplates: () -> Unit,
+    onDismissTemplateMessage: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -60,6 +64,53 @@ fun ExportBar(
                     color = Color(0xFF00B4D8),
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
+            }
+
+            // 模板套用结果（缺失项可展开）
+            if (templateMessage.isNotEmpty()) {
+                var showMissing by remember(templateMessage) { mutableStateOf(false) }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = templateMessage,
+                            fontSize = 11.sp,
+                            color = Color(0xFF475569),
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (templateMissing.isNotEmpty()) {
+                            TextButton(
+                                onClick = { showMissing = !showMissing },
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                Text(
+                                    text = if (showMissing) "收起" else "查看缺失",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF00B4D8)
+                                )
+                            }
+                        }
+                        TextButton(
+                            onClick = onDismissTemplateMessage,
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("关闭", fontSize = 11.sp, color = Color(0xFF94A3B8))
+                        }
+                    }
+                    if (showMissing) {
+                        Text(
+                            text = templateMissing.joinToString("、"),
+                            fontSize = 11.sp,
+                            color = Color(0xFF94A3B8),
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
             }
 
             // 控制行
@@ -115,9 +166,26 @@ fun ExportBar(
                     }
                 }
 
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // 模板入口
+                Surface(
+                    onClick = onOpenTemplates,
+                    enabled = !isExporting,
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFFF1F5F9)
+                ) {
+                    Text(
+                        text = "模板",
+                        fontSize = 12.sp,
+                        color = Color(0xFF475569),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+
                 // 选中数量
                 Text(
-                    text = "已选 $selectedCount / $totalCount",
+                    text = "$selectedCount/$totalCount",
                     fontSize = 12.sp,
                     color = Color(0xFF64748B)
                 )

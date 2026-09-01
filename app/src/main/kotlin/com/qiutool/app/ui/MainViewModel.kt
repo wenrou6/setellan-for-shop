@@ -36,6 +36,11 @@ data class UiState(
     val isExporting: Boolean = false,
     val isLoading: Boolean = false,
     val error: String = "",
+    // 导出模板
+    val lastTemplate: ExportTemplate? = null,
+    val templates: List<ExportTemplate> = emptyList(),
+    val templateMessage: String = "",
+    val templateMissing: List<String> = emptyList(),
     // 设置项
     val analyzeAllFiles: Boolean = false,
     val shopconfigOutputDir: String = DEFAULT_SHOPCONFIG_DIR,
@@ -67,6 +72,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         otherOutputDir = prefs.getString("other_output_dir", null)
             ?: UiState.DEFAULT_OTHER_DIR,
         permissionMethod = prefs.getString("permission_method", null) ?: "all_files",
+        lastTemplate = ExportTemplates.decodeOne(prefs.getString("last_template", null)),
+        templates = ExportTemplates.decode(prefs.getString("saved_templates", null)),
     )
 
     private fun persist(block: android.content.SharedPreferences.Editor.() -> Unit) {
@@ -185,6 +192,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     selectedTokens = emptySet(),
                     isLoading = false,
                     currentTab = 2,
+                    templateMessage = "",
+                    templateMissing = emptyList(),
                 )
             } catch (e: Exception) {
                 AppLogger.w("QiuTool", "analyze resource failed: ${e.message}", e)
@@ -226,6 +235,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     selectedTokens = emptySet(),
                     isLoading = false,
                     currentTab = 2,
+                    templateMessage = "",
+                    templateMissing = emptyList(),
                 )
             } catch (e: Exception) {
                 AppLogger.w("QiuTool", "analyze local file failed: ${e.message}", e)
@@ -352,6 +363,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _uiState.value = state.copy(selectedTokens = selected.toSet())
     }
+
+    /** 把当前勾选与导出模式另存为命名模板。 */
+    fun saveTemplate(name: String) {
+        val state = _uiState.value
+        if (state.selectedTokens.isEmpty()) {
+            _uiState.value = state.copy(error = "未选中任何项目，无法保存模板")
+            return
+        }
+        val finalName = name.trim().ifEmpty { ExportTemplates.defaultName(state.templates) }
+        if (finalName == ExportTemplates.LAST_TEMPLATE_NAME) {
+            _uiState.value = state.copy(error = "「${ExportTemplates.LAST_TEMPLATE_NAME}」是保留名称，请换一个")
+            return
+        }
+        val template = buildTemplate(finalName, state)
+        val templates = ExportTemplates.upsert(state.templates, template)
+        _uiState.value = state.copy(
+            templates = templates,
+            templateMessage = "已保存模板「$finalName」：${template.tokens.size} 项",
+            templateMissing = emptyList(),
+        )
+        persist { putString("saved_templates", ExportTemplates.encode(templates)) }
+    }
+
+    fun deleteTemplate(name: String) {
+        val state = _uiState.value
+        val templates = ExportTemplates.remove(state.templates, name)
+        _uiState.value = state.copy(templates = templates)
+        persist { putString("saved_templates", ExportTemplates.encode(templates)) }
+    }
+
+    /** 套用模板：只勾选当前 Bundle 里存在的 token，缺失项回报给界面。 */
+    fun applyTemplate(template: ExportTemplate) {
+        val state = _uiState.value
+        val analysis = state.analysis
+        if (analysis == null) {
+            _uiState.value = state.copy(error = "请先分析一个 Bundle 再套用模板")
+            return
+        }
+        val result = ExportTemplates.applyTo(template, analysis.items)
+        val message = buildString {
+            append("已套用模板「${template.name}」：匹配 ${result.matched.size} 项")
+            if (result.missing.isNotEmpty()) {
+                append("，缺失 ${result.missing.size} 项")
+            }
+        }
+        _uiState.value = state.copy(
+            selectedTokens = result.matched,
+            exportMode = template.mode,
+            templateMessage = message,
+            templateMissing = result.missing,
+        )
+    }
+
+    fun clearTemplateMessage() {
+        _uiState.value = _uiState.value.copy(templateMessage = "", templateMissing = emptyList())
+    }
+
+    private fun buildTemplate(name: String, state: UiState): ExportTemplate = ExportTemplate(
+        name = name,
+        mode = state.exportMode,
+        tokens = state.selectedTokens.toList(),
+        sourceCategory = state.currentSourceCategory,
+        savedAt = System.currentTimeMillis(),
+    )
 
     fun getFilteredItems(): List<ItemRecord> {
         val state = _uiState.value
@@ -509,11 +584,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         append("\n⚠️ 导出文件比原始大 ${outputSize - sourceSize} 字节（${outputSize}/${sourceSize}），游戏可能因 ver.xml 体积校验拒绝加载。建议减少保留项或换排除模式。")
                     }
                 }
+                val lastTemplate = buildTemplate(ExportTemplates.LAST_TEMPLATE_NAME, state)
                 _uiState.value = _uiState.value.copy(
                     isExporting = false,
                     exportProgress = 100,
-                    exportMessage = "已导出到 ${targetDir.absolutePath}\n$summaryMsg"
+                    exportMessage = "已导出到 ${targetDir.absolutePath}\n$summaryMsg",
+                    lastTemplate = lastTemplate,
                 )
+                persist { putString("last_template", ExportTemplates.encodeOne(lastTemplate)) }
             } catch (e: Exception) {
                 AppLogger.e("QiuTool", "export failed: ${e.message}", e)
                 _uiState.value = _uiState.value.copy(

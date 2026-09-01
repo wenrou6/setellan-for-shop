@@ -37,6 +37,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
     var showPermissionPicker by remember { mutableStateOf(false) }
+    var showTemplates by remember { mutableStateOf(false) }
     val tabs = listOf(
         "官方" to state.resources.size,
         "本地" to 0,
@@ -57,8 +58,12 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             message = state.exportMessage,
                             selectedCount = state.selectedTokens.size,
                             totalCount = viewModel.getFilteredItems().size,
+                            templateMessage = state.templateMessage,
+                            templateMissing = state.templateMissing,
                             onModeChange = { viewModel.setExportMode(it) },
                             onExport = { viewModel.exportBundle() },
+                            onOpenTemplates = { showTemplates = true },
+                            onDismissTemplateMessage = { viewModel.clearTemplateMessage() },
                         )
                     }
                     CopyrightFooter()
@@ -258,6 +263,22 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             }
                     }
                 },
+            )
+        }
+
+        if (showTemplates) {
+            TemplateDialog(
+                lastTemplate = state.lastTemplate,
+                templates = state.templates,
+                selectedCount = state.selectedTokens.size,
+                canApply = state.analysis != null && !state.isExporting,
+                onApply = {
+                    viewModel.applyTemplate(it)
+                    showTemplates = false
+                },
+                onDelete = { viewModel.deleteTemplate(it) },
+                onSave = { viewModel.saveTemplate(it) },
+                onDismiss = { showTemplates = false },
             )
         }
 
